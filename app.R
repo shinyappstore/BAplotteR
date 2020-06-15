@@ -65,19 +65,29 @@ ui <- fluidPage(
             condition = "input.tabs=='Plot'",
             radioButtons("plot_type", "Select Plot:", choices = 
                            list(
-                             "Bland-Altman (difference)" = 1,
-                             "Bland-Altman (difference as percentage)" = 2,
-                             "Bland-Altman (difference of log2 transformed data)" = 3,
+                             "Bland-Altman: difference [absolute]" = 1,
+                             "Bland-Altman: difference/average [percentage]" = 2,
+                             # "Bland-Altman: difference of log2 transformed data" = 3,
                              "Correlation (y~x)"=5),
                          selected =  1),
             sliderInput("pointSize", "Size of the datapoints", 0, 10, 4),  
             
             sliderInput("alphaInput", "Visibility of the data", 0, 1, 0.8),  
             h4("Statistics"),
-
+            
+            
+            radioButtons("LoA", "Limits of Agreement", choices = 
+                           list(
+                             "Ordinary" = 1,
+                             "Regression" = 2
+                             ),
+                         selected =  1),
+            
+            
+            conditionalPanel(condition = "input.LoA=='1'",
             checkboxInput(inputId = "add_CI",
                           label = "Show 95% confidence intervals",
-                          value = FALSE),            
+                          value = FALSE)),            
             checkboxInput(inputId = "show_rugs",
                           label = "Show rugs",
                           value = FALSE),
@@ -263,6 +273,23 @@ ui <- fluidPage(
 
               NULL
               ),
+          
+          conditionalPanel(
+            condition = "input.tabs=='Data Summary'",
+            h4("Data summary")
+            # checkboxGroupInput("stats_select", label = h5("Statistics for table:"), 
+            #                    choices = list("mean", "sd", "sem","95CI mean", "median", "MAD", "IQR", "Q1", "Q3", "95CI median"),
+            #                    selected = "sem"),
+            # actionButton('select_all1','select all'),
+            # actionButton('deselect_all1','deselect all'),
+            # numericInput("digits", "Digits:", 2, min = 0, max = 5)
+            #        ,
+            #        selectInput("stats_hide2", "Select columns to hide", "", multiple = TRUE, choices=list("mean", "sd", "sem","95CI mean", "median", "MAD", "IQR", "Q1", "Q3", "95CI median")
+          ) ,
+          
+          
+          
+          
           conditionalPanel(
             condition = "input.tabs=='About'",
             
@@ -302,6 +329,8 @@ ui <- fluidPage(
 
                               ),
                     # tabPanel("iPlot", h4("iPlot"), plotlyOutput("out_plotly")),
+                    tabPanel("Data Summary",dataTableOutput('data_summary')
+                    ),
 
                     tabPanel("About", includeHTML("about.html"))
                     )
@@ -769,31 +798,49 @@ df_filtered <- reactive({
 
     x_choice <- input$x_var
     y_choice <- input$y_var
-    g_choice <- input$g_var
-    
 
-    if (g_choice == "-") {
+
+
       koos <- df %>% select(`Measurement_1` = !!x_choice , `Measurement_2` = !!y_choice)
-      koos$Name <- " "
-    } else if (g_choice != "-") {
-      koos <- df %>% select(`Measurement_1` = !!x_choice , `Measurement_2` = !!y_choice, Name = input$g_var)
 
-      
-    }
     
     koos <- koos %>% mutate(Difference = Measurement_1-Measurement_2, Average = 0.5*Measurement_1+0.5*Measurement_2, Ratio=Measurement_1/Measurement_2, Percentage=100*Difference/(Average))
+    
+    
+    if (input$plot_type==1) {
+      koos$y <- koos$Difference
+      
+      
+    } else if (input$plot_type==2) {
+      koos$y <- koos$Percentage
+      
+    } else if (input$plot_type==3) {
+      koos$y <- log2(koos$Ratio)
+      
+    } else if (input$plot_type==5) {
+    
+      koos$y <- koos$Measurement_2
+      }
+    
+    
     
     observe({(print(head(koos)))})
     
     #Update the gene list for user selection
     updateSelectizeInput(session, "user_label_list", choices = koos$Name, selected = genelist.selected)
   
+    
+    
+    ########## SOME STATISTICAL EVALUATION OF THE DATA ##########
     # Test the difference for normality
     test_result <- shapiro.test(koos$Difference)
     observe({print(test_result$p.value)})
 
 ##    koos <- koos %>%mutate(Change = ifelse((foldchange >= foldchange_tr && pvalue >= pvalue_tr ),"Increased", ifelse(foldchange<=-foldchange_tr , "Decreased", "Unchanged")))
 
+    
+    
+    #Compatibility thing, should probably be removed.
     koos$Change <- 'Unchanged'
     
     return(koos)
@@ -802,6 +849,64 @@ df_filtered <- reactive({
     #   select_all(~gsub("\\s+|\\.", "_", .))
     
 })
+  
+df_stats <- reactive({     
+
+  df <- df_filtered()
+  
+  avg <- mean(df$y)
+  stdev <- sd(df$y)
+  
+  LoA_hi <- avg + 1.96* stdev
+  LoA_lo <- avg - 1.96* stdev
+  
+  n <- length(df$y)
+  SE_d <- stdev / sqrt(n - 1)
+  SE_stdev <- 1.71*SE_d
+  
+  mean_CI_lo = avg + qt((1-0.95)/2, n - 1) * SE_d
+  mean_CI_hi = avg - qt((1-0.95)/2, n - 1) * SE_d
+  
+  LoA_hi_CI_lo = LoA_hi + qt((1-0.95)/2, n - 1)*SE_stdev
+  LoA_hi_CI_hi = LoA_hi - qt((1-0.95)/2, n - 1)*SE_stdev
+  
+  LoA_lo_CI_lo = LoA_lo + qt((1-0.95)/2, n - 1)*SE_stdev
+  LoA_lo_CI_hi = LoA_lo - qt((1-0.95)/2, n - 1)*SE_stdev
+  
+  
+  df_difference <- data.frame(parameter=c('difference', 'upper Limit of Agreement', 'lower Limit of Agreement'),avg=c(avg,LoA_hi, LoA_lo), lo=c(mean_CI_lo,LoA_hi_CI_lo,LoA_lo_CI_lo),hi=c(mean_CI_hi,LoA_hi_CI_hi,LoA_lo_CI_hi))
+  
+  linearMod <- lm(y ~ Average, data=df)
+  
+  df_coef <- data.frame(parameter=c('intercept', 'slope'),avg=linearMod$coefficients)
+  # Calculate the CI of intercept and slope
+  x <- confint(linearMod, level=0.95)
+  df_x <- (data.frame(lo=x[,1], hi=x[,2]))
+  df_coef <- bind_cols(df_coef,df_x)
+  
+  df_coef <- bind_rows(df_difference,df_coef)
+  df_coef <- data.frame(df_coef, row.names = 1)
+  df_coef <- round(df_coef,2)
+  # observe({print(df_coef)})
+  return(df_coef)
+  
+})  
+  
+
+output$data_summary <- renderDataTable(
+  datatable(
+    df_stats(),
+    #  colnames = c(ID = 1),
+    selection = 'none',
+    extensions = c('Buttons', 'ColReorder'),
+    options = list(dom = 'Bfrtip', pageLength = 100,
+                   buttons = c('copy', 'csv','excel', 'pdf'),
+                   editable=FALSE, colReorder = list(realtime = FALSE), columnDefs = list(list(className = 'dt-center', targets = '_all'))
+    ) 
+  ) 
+  #   %>% formatRound(n, digits=0)
+) 
+
 
 ############## Render the data summary as a table ###########
   
@@ -812,116 +917,6 @@ output$toptable <- renderTable({
     
   })
 
-  
-# plot_data <- reactive({
-#     
-#     ############## Adjust X-scaling if necessary ##########
-#     
-#     #Adjust scale if range for x (min,max) is specified
-#     if (input$range_x != "" &&  input$change_scale == TRUE) {
-#       rng_x <- as.numeric(strsplit(input$range_x,",")[[1]])
-#       observe({ print(rng_x) })
-#     } else if (input$range_x == "" ||  input$change_scale == FALSE) {
-#       
-#       rng_x <- c(NULL,NULL)
-#     }
-#     
-#     ############## Adjust Y-scaling if necessary ##########
-#     
-#     #Adjust scale if range for y (min,max) is specified
-#     if (input$range_y != "" &&  input$change_scale == TRUE) {
-#       rng_y <- as.numeric(strsplit(input$range_y,",")[[1]])
-#     } else if (input$range_y == "" ||  input$change_scale == FALSE) {
-#       
-#       rng_y <- c(NULL,NULL)
-#     }
-#     
-#     df <- as.data.frame(df_filtered())
-#     #Convert 'Change' to a factor to keep this order, necessary for getting the colors right
-#     df$Change <- factor(df$Change, levels=c("Unchanged","Increased","Decreased"))
-#     
-#     p <-  ggplot(data = df) +
-#       aes(x=`Measurement_1`) +
-#       aes(y=`Measurement_2`) +
-#       geom_point(alpha = input$alphaInput, size = input$pointSize, shape = 16) +
-#       
-#       # This needs to go here (before annotations)
-#       theme_light(base_size = 16) +
-#       aes(color=Change) + 
-#       scale_color_manual(values=c("grey", "red", "blue")) +
-#       
-#       #remove gridlines (if selected
-#       theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
-#       
-#       NULL
-#     
-#     #Indicate cut-offs with dashed lines
-#     p <- p + geom_vline(xintercept = 0, linetype="dashed")
-# 
-#     p <- p + geom_hline(yintercept = 0, linetype="dashed") 
-#     
-#     # if log-scale checked specified
-#     if (input$scale_log_10)
-#       p <- p + scale_y_log10() 
-#     
-#     ########## User defined labeling     
-#     if (input$hide_labels == FALSE) {
-#       p <-  p + geom_point(data=df_user(), aes(x=`Measurement_1`,y=`Measurement_2`), shape=1,color="black", size=(input$pointSize))+
-#         geom_text_repel(
-#           data = df_user(),
-#           aes(label = Name),
-#           size = input$fnt_sz_cand,
-#           color="black",
-#           nudge_x = 0.2,
-#           nudge_y=0.2,
-#           box.padding = unit(0.9, "lines"),
-#           point.padding = unit(.3+input$pointSize*0.1, "lines"),show.legend=F
-#           )
-#       
-#     }
-# 
-#     
-#     p <- p + coord_cartesian(xlim=c(rng_x[1],rng_x[2]),ylim=c(rng_y[1],rng_y[2]))
-#     #### If selected, rotate plot 90 degrees CW ####
-#     if (input$rotate_plot == TRUE) { p <- p + coord_flip(xlim=c(rng_x[1],rng_x[2]),ylim=c(rng_y[1],rng_y[2]))}
-#     
-#     ########## Do some formatting of the lay-out ##########
-#     
-#     
-#     
-#     # if title specified
-#     if (input$add_title == TRUE) {
-#       #Add line break to generate some space
-#       title <- paste(input$title, "\n",sep="")
-#       p <- p + labs(title = title)
-#     } else if (input$sheet !=" ") {
-#       title <- paste(input$sheet, "\n",sep="")
-#       observe({print('yay')})
-#       p <- p + labs(title = title)
-#     }
-#     
-#     # # if labels specified
-#     if (input$label_axes)
-#       p <- p + labs(x = input$lab_x, y = input$lab_y)
-#     
-#     # # if font size is adjusted
-#     if (input$adj_fnt_sz) {
-#       p <- p + theme(axis.text = element_text(size=input$fnt_sz_ax))
-#       p <- p + theme(axis.title = element_text(size=input$fnt_sz_labs))
-#       p <- p + theme(plot.title = element_text(size=input$fnt_sz_title))
-#     }
-#     
-#     #remove legend (if selected)
-#     if (input$add_legend == FALSE) {  
-#       p <- p + theme(legend.position="none")
-#     }
-#     
-#     p
-#     
-#   })
-
-  
-    ##### Render the plot ############
   
   ##### Render the plot ############
   
@@ -1000,56 +995,86 @@ plotdata <- reactive({
       rng_y <- c(NULL,NULL)
     }
   
-  # avg <- mean(df$Difference)
-  # stdev <- sd(df$Difference)
+
+  # Calculate Stats for y-variable
+  avg <- mean(df$y)
+  stdev <- sd(df$y)
+  
+  LoA_hi <- avg + 1.96* stdev
+  LoA_lo <- avg - 1.96* stdev
+  
+  n <- length(df$y)
+  
+  # Standard error of the difference
+  SE_d <- stdev / sqrt(n - 1)
+  # Approximate standard error of the standard deviation; source: Bland&Altman (1999)
+  SE_stdev <- 1.71*SE_d
+  
+  mean_CI_lo = avg + qt((1-0.95)/2, n - 1) * SE_d
+  mean_CI_hi = avg - qt((1-0.95)/2, n - 1) * SE_d
+  
+  LoA_hi_CI_hi = LoA_hi + qt((1-0.95)/2, n - 1)*SE_stdev
+  LoA_hi_CI_lo = LoA_hi - qt((1-0.95)/2, n - 1)*SE_stdev
+  
+  LoA_lo_CI_hi = LoA_lo + qt((1-0.95)/2, n - 1)*SE_stdev
+  LoA_lo_CI_lo = LoA_lo - qt((1-0.95)/2, n - 1)*SE_stdev
   
 
     # Define the plotting object    
     p <-  ggplot(data = df)
 
-    
-    if (input$plot_type==1) {
+    if (input$plot_type!=5) {
       
-      # Calculate Stats
-      avg <- mean(df$Difference)
-      stdev <- sd(df$Difference)
-      
-      LoA_hi <- avg + 1.96* stdev
-      LoA_lo <- avg - 1.96* stdev
-      
-      n <- length(df$Difference)
-      
-      if(input$add_CI ==TRUE) {
-      
-          # Standard error of the difference
-          SE_d <- stdev / sqrt(n - 1)
-          # Approximate standard error of the standard deviation; source: Bland&Altman (1999)
-          SE_stdev <- 1.71*SE_d
-          
-          mean_CI_lo = avg + qt((1-0.95)/2, n - 1) * SE_d
-          mean_CI_hi = avg - qt((1-0.95)/2, n - 1) * SE_d
-    
-          LoA_hi_CI_hi = LoA_hi + qt((1-0.95)/2, n - 1)*SE_stdev
-          LoA_hi_CI_lo = LoA_hi - qt((1-0.95)/2, n - 1)*SE_stdev
-                
-          LoA_lo_CI_hi = LoA_lo + qt((1-0.95)/2, n - 1)*SE_stdev
-          LoA_lo_CI_lo = LoA_lo - qt((1-0.95)/2, n - 1)*SE_stdev
-          
+      if(input$add_CI ==TRUE && input$LoA=='1') {
 
           p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=mean_CI_hi,ymin=mean_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
           p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=LoA_hi_CI_hi,ymin=LoA_hi_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
           p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=LoA_lo_CI_hi,ymin=LoA_lo_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
-
-      
       }
+      
+      if (input$LoA =='1') {
       
       p <- p + geom_hline(yintercept = 0, linetype="solid", color="grey", size=0.5)
       
       p <- p + geom_hline(yintercept = avg, linetype="dotted", color="black", size=1,alpha=input$alphaInput_summ)
       p <- p + geom_hline(yintercept = c(LoA_hi, LoA_lo), linetype="dashed", color="black", size=1,alpha=input$alphaInput_summ)      
       
+      
+      } else if (input$LoA=='2') {
+        
+        #Linear regression of y versus Average
+        linearMod <- lm(y ~ Average, data=df)
+        b0 <- linearMod$coefficients[1]
+        b1 <- linearMod$coefficients[2]
+
+        
+        #Determine residuals
+        df$residuals <- linearMod$residuals
+        df$abs_residuals <- abs(df$residuals)
+        
+        #Regress residuals on Average
+        linearModRes <- lm(abs_residuals ~ Average, data=df)
+
+        c0 <- linearModRes$coefficients[1]
+        c1 <- linearModRes$coefficients[2]
+        
+        # According to Bland&Altman
+        # b0+b1*Average±2.46*(c0+c1*A)
+        
+        df <- df %>% mutate(Diff = b0+b1*Average,LoA_regr_hi = b0+b1*Average+2.46*(c0+c1*Average), LoA_regr_lo = b0+b1*Average-2.46*(c0+c1*Average))
+        
+        p <- p+geom_line(data=df, aes(x=Average,y=Diff), linetype="dotted", color="black", size=1,alpha=input$alphaInput_summ)
+        p <- p+geom_line(data=df,aes(x=Average,y=LoA_regr_hi), linetype="dashed", color="black", size=1,alpha=input$alphaInput_summ)
+        p <- p+geom_line(data=df,aes(x=Average,y=LoA_regr_lo), linetype="dashed", color="black", size=1,alpha=input$alphaInput_summ)
+
+        
+      }
+      
+      
+      
+      
       p <- p +  aes(x=`Average`) +
-        aes(y=`Difference`) +
+        aes(y=`y`) +
         geom_point(alpha = input$alphaInput, size = input$pointSize, shape = 16)
       
       # p <- p + scale_y_continuous(breaks=c(0, 10, 15, -10))
@@ -1059,98 +1084,7 @@ plotdata <- reactive({
       p <- p + scale_y_continuous(sec.axis = sec_axis(~ . * 1  , breaks = (round(c(avg, LoA_hi, LoA_lo),input$digits))))
       #Indicate cut-offs with dashed lines
       }
-      
-    } else if (input$plot_type==2) {
-      avg <- mean((df$Percentage))
-      stdev <- sd((df$Percentage))
-      
-      LoA_hi <- avg + 1.96* stdev
-      LoA_lo <- avg - 1.96* stdev
-      
-      n <- length(df$Percentage)
-      
-      if(input$add_CI ==TRUE) {
-        
-        # Standard error of the difference
-        SE_d <- stdev / sqrt(n - 1)
-        # Approximate standard error of the standard deviation; source: Bland&Altman (1999)
-        SE_stdev <- 1.71*SE_d
-        
-        mean_CI_lo = avg + qt((1-0.95)/2, n - 1) * SE_d
-        mean_CI_hi = avg - qt((1-0.95)/2, n - 1) * SE_d
-        
-        LoA_hi_CI_hi = LoA_hi + qt((1-0.95)/2, n - 1)*SE_stdev
-        LoA_hi_CI_lo = LoA_hi - qt((1-0.95)/2, n - 1)*SE_stdev
-        
-        LoA_lo_CI_hi = LoA_lo + qt((1-0.95)/2, n - 1)*SE_stdev
-        LoA_lo_CI_lo = LoA_lo - qt((1-0.95)/2, n - 1)*SE_stdev
-        
-        p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=mean_CI_hi,ymin=mean_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
-        p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=LoA_hi_CI_hi,ymin=LoA_hi_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
-        p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=LoA_lo_CI_hi,ymin=LoA_lo_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
-        
-      }
-      
-      p <- p + geom_hline(yintercept = 0, linetype="solid", color="grey", size=0.5)
-      
-      p <- p + geom_hline(yintercept = avg, linetype="dotted", color="black", size=1,alpha=input$alphaInput_summ)
-      p <- p + geom_hline(yintercept = c(LoA_hi, LoA_lo), linetype="dashed", color="black", size=1,alpha=input$alphaInput_summ) 
-      
-      p <- p +  aes(x=`Average`) +
-        aes(y=`Percentage`) +
-        geom_point(alpha = input$alphaInput, size = input$pointSize, shape = 16)
-      
-      if (input$show_labels) {
-        p <- p + scale_y_continuous(sec.axis = sec_axis(~ . * 1  , breaks = (round(c(avg, LoA_hi, LoA_lo),input$digits))))
-        #Indicate cut-offs with dashed lines
-      }
-      
-      
-    } else if (input$plot_type==3) {
-      avg <- mean(log2(df$Ratio))
-      stdev <- sd(log2(df$Ratio))
-
-      LoA_hi <- avg + 1.96* stdev
-      LoA_lo <- avg - 1.96* stdev
-      
-      n <- length(df$Ratio)
-      
-      if(input$add_CI ==TRUE) {
-        
-        # Standard error of the difference
-        SE_d <- stdev / sqrt(n - 1)
-        # Approximate standard error of the standard deviation; source: Bland&Altman (1999)
-        SE_stdev <- 1.71*SE_d
-        
-        mean_CI_lo = avg + qt((1-0.95)/2, n - 1) * SE_d
-        mean_CI_hi = avg - qt((1-0.95)/2, n - 1) * SE_d
-        
-        LoA_hi_CI_hi = LoA_hi + qt((1-0.95)/2, n - 1)*SE_stdev
-        LoA_hi_CI_lo = LoA_hi - qt((1-0.95)/2, n - 1)*SE_stdev
-        
-        LoA_lo_CI_hi = LoA_lo + qt((1-0.95)/2, n - 1)*SE_stdev
-        LoA_lo_CI_lo = LoA_lo - qt((1-0.95)/2, n - 1)*SE_stdev
-        
-        p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=mean_CI_hi,ymin=mean_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
-        p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=LoA_hi_CI_hi,ymin=LoA_hi_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
-        p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=LoA_lo_CI_hi,ymin=LoA_lo_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
-        
-      }
-      
-      p <- p + geom_hline(yintercept = 0, linetype="solid", color="grey", size=0.5)
-      
-      p <- p + geom_hline(yintercept = avg, linetype="dotted", color="black", size=1,alpha=input$alphaInput_summ)
-      p <- p + geom_hline(yintercept = c(LoA_hi, LoA_lo), linetype="dashed", color="black", size=1,alpha=input$alphaInput_summ)     
-      
-        p <- p +  aes(x=`Average`) +
-        aes(y=log2(`Ratio`)) +
-        geom_point(alpha = input$alphaInput, size = input$pointSize, shape = 16)
-        
-        if (input$show_labels) {
-          p <- p + scale_y_continuous(sec.axis = sec_axis(~ . * 1  , breaks = (round(c(avg, LoA_hi, LoA_lo),input$digits))))
-          #Indicate cut-offs with dashed lines
-        }
-        
+    
         
     } else if (input$plot_type==5) {
       #Indicate cut-offs with dashed lines
@@ -1222,45 +1156,6 @@ plotdata <- reactive({
 
     p
   })
-  
-###### From: https://gitlab.com/snippets/16220 ########
-# output$hover_info <- renderUI({
-#   df <- as.data.frame(df_filtered())
-#   
-#   hover <- input$plot_hover
-#   point <- nearPoints(df, hover, threshold = 10, maxpoints = 1, addDist = FALSE)
-#   if (nrow(point) == 0) return(NULL)
-#   
-#   # calculate point position INSIDE the image as percent of total dimensions
-#   # from left (horizontal) and from top (vertical)
-#   left_pct <- (hover$x - hover$domain$left) / (hover$domain$right - hover$domain$left)
-#   top_pct <- (hover$domain$top - hover$y) / (hover$domain$top - hover$domain$bottom)
-#   
-#   # calculate distance from left and bottom side of the picture in pixels
-#   left_px <- hover$range$left + left_pct * (hover$range$right - hover$range$left)
-#   top_px <- hover$range$top + top_pct * (hover$range$bottom - hover$range$top)
-#   
-#   # create style property fot tooltip
-#   # background color is set so tooltip is a bit transparent
-#   # z-index is set so we are sure are tooltip will be on top
-#   style <- paste0("position:absolute;
-#                   padding: 5px;
-#                   z-index:100; background-color: rgba(200, 200, 245, 0.65); ",
-#                   "left:", left_px + 20, "px; top:", top_px + 32, "px;")
-#   
-#   # actual tooltip created as wellPanel
-#   wellPanel(
-#     style = style,
-#     p(HTML(paste0("<b> Name: </b>", point$Name, "<br/>",
-#                   "<b> Difference: </b>", round(point[4],2), "<br/>",
-#                   "<b> Average: </b>", round(point[5],2), "<br/>",
-#                   # "<b> Number: </b>", rownames(point), "<br/>",
-#                   # top_px,
-#                   NULL
-#     )
-#     ))
-#   )
-# })
 
   
   ######### DEFINE DOWNLOAD BUTTONS FOR ORDINARY PLOT ###########
