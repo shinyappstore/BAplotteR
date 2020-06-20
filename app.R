@@ -65,10 +65,10 @@ ui <- fluidPage(
             condition = "input.tabs=='Plot'",
             radioButtons("plot_type", "Select Plot:", choices = 
                            list(
-                             "Bland-Altman: difference [absolute]" = 1,
-                             "Bland-Altman: difference/average [percentage]" = 2,
-                             # "Bland-Altman: difference of log2 transformed data" = 3,
-                             "Correlation (y~x)"=5),
+                             "BA, y-axis: Difference [absolute]" = 1,
+                             "BA, y-axis: Difference/Average [percentage]" = 2,
+                             "BA, y-axis: Difference of log2 transformed data" = 3,
+                             "Correlation (Measurement_2 vs. Measurement_1)"=5),
                          selected =  1),
             sliderInput("pointSize", "Size of the datapoints", 0, 10, 4),  
             
@@ -263,11 +263,11 @@ ui <- fluidPage(
                  textInput("URL", "URL", value = ""), 
                 NULL
               ),
-              h4('Select X & Y variables'),
+              h4('Select measurements'),
               
               selectInput("x_var", label = "Measurement 1", choices = "-"),
               selectInput("y_var", label = "Measurement 2", choices = "-"),
-              selectInput("g_var", label = "Select column with names", choices = "-"),
+              # selectInput("g_var", label = "Select column with names", choices = "-"),
               
               hr(),
 
@@ -893,6 +893,33 @@ df_stats <- reactive({
 })  
   
 
+# A queue of notification IDs
+ids <- character(0)
+# A counter
+n <- 0
+
+# observeEvent(input$plot_type, {
+#   # Save the ID for removal later
+#   
+#    # df <- df_stats()
+# 
+#    if (input$LoA=='1') {
+# 
+#   if (length(ids) > 0) {
+#     removeNotification(ids[1])
+#     ids <<- ids[-1]}
+#   
+#   id <- showNotification(paste("Plot type", "xxx"), duration = 10, type = "warning")
+#   ids <<- c(ids, id)
+#   n <<- n + 1
+#   
+#   # If LoA are ordinary && slope <>0 -> regression based analysis
+#   
+#    }
+# })
+
+
+
 output$data_summary <- renderDataTable(
   datatable(
     df_stats(),
@@ -1019,11 +1046,21 @@ plotdata <- reactive({
   LoA_lo_CI_hi = LoA_lo + qt((1-0.95)/2, n - 1)*SE_stdev
   LoA_lo_CI_lo = LoA_lo - qt((1-0.95)/2, n - 1)*SE_stdev
   
+  
+  
+
+  
+  
 
     # Define the plotting object    
     p <-  ggplot(data = df)
 
     if (input$plot_type!=5) {
+      
+      #Linear Regression analysis
+      linearMod <- lm(y ~ Average, data=df)
+      x <- round(confint(linearMod, level=0.95),2)
+      y <- (data.frame(lo=x[,1], hi=x[,2]))
       
       if(input$add_CI ==TRUE && input$LoA=='1') {
 
@@ -1033,6 +1070,11 @@ plotdata <- reactive({
       }
       
       if (input$LoA =='1') {
+        
+        #95CI of Slope != 0
+        if ((y$lo[2] > 0 && y$hi[2] > 0) || (y$lo[2] < 0 && y$hi[2] < 0)) {
+          showNotification(paste("The slope of the difference has a 95%CI [",y$lo[2],",",y$hi[2],"] that does not include zero suggesting proportional bias: using a regrression-based LoA is recommended"), duration = 10, type = "warning")
+        }
       
       p <- p + geom_hline(yintercept = 0, linetype="solid", color="grey", size=0.5)
       
@@ -1043,7 +1085,7 @@ plotdata <- reactive({
       } else if (input$LoA=='2') {
         
         #Linear regression of y versus Average
-        linearMod <- lm(y ~ Average, data=df)
+
         b0 <- linearMod$coefficients[1]
         b1 <- linearMod$coefficients[2]
 
