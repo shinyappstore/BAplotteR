@@ -19,6 +19,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
+boot_LoA = function(x) {
+  quantile(sample(x, replace = TRUE), probs = c(0.05,0.5,0.95))
+}
+
+#number of replicates for bootstrap
+nrep = 500
+
 # ToDo:
 
 # Table with LoA
@@ -79,12 +86,13 @@ ui <- fluidPage(
             radioButtons("LoA", "Limits of Agreement", choices = 
                            list(
                              "Ordinary" = 1,
-                             "Regression" = 2
+                             "Regression" = 2,
+                             "Non parametric" = 3
                              ),
                          selected =  1),
             
             
-            conditionalPanel(condition = "input.LoA=='1'",
+            conditionalPanel(condition = "input.LoA!='2'",
             checkboxInput(inputId = "add_CI",
                           label = "Show 95% confidence intervals",
                           value = FALSE)),            
@@ -142,9 +150,9 @@ ui <- fluidPage(
                              textInput("user_color_list", "List of names or hexadecimal codes", value = "turquoise2")), 
             
             
-            checkboxInput(inputId = "rotate_plot",
-                          label = "Rotate plot 90 degrees",
-                          value = FALSE),
+            # checkboxInput(inputId = "rotate_plot",
+            #               label = "Rotate plot 90 degrees",
+            #               value = FALSE),
             checkboxInput(inputId = "change_scale",
                           label = "Change scale",
                           value = FALSE),
@@ -174,6 +182,7 @@ ui <- fluidPage(
                           value = FALSE),
             conditionalPanel(
               condition = "input.add_title == true",
+              checkboxInput("align", "Centre the title", value = FALSE),
               textInput("title", "Title:", value = "")
             ),
             
@@ -276,13 +285,13 @@ ui <- fluidPage(
           
           conditionalPanel(
             condition = "input.tabs=='Data Summary'",
-            h4("Data summary")
+            h4("Data summary"),
             # checkboxGroupInput("stats_select", label = h5("Statistics for table:"), 
             #                    choices = list("mean", "sd", "sem","95CI mean", "median", "MAD", "IQR", "Q1", "Q3", "95CI median"),
             #                    selected = "sem"),
             # actionButton('select_all1','select all'),
             # actionButton('deselect_all1','deselect all'),
-            # numericInput("digits", "Digits:", 2, min = 0, max = 5)
+            numericInput("digits_table", "Digits:", 2, min = 0)
             #        ,
             #        selectInput("stats_hide2", "Select columns to hide", "", multiple = TRUE, choices=list("mean", "sd", "sem","95CI mean", "median", "MAD", "IQR", "Q1", "Q3", "95CI median")
           ) ,
@@ -329,7 +338,7 @@ ui <- fluidPage(
 
                               ),
                     # tabPanel("iPlot", h4("iPlot"), plotlyOutput("out_plotly")),
-                    tabPanel("Data Summary",dataTableOutput('data_summary')
+                    tabPanel("Data Summary",dataTableOutput('data_summary'),htmlOutput("stats", width="200px", inline =FALSE)
                     ),
 
                     tabPanel("About", includeHTML("about.html"))
@@ -607,7 +616,7 @@ observe({
     presets_layout <- unlist(strsplit(presets_layout,";"))
     # observe(print((presets_layout)))
     
-    updateCheckboxInput(session, "rotate_plot", value = presets_layout[1])
+    # updateCheckboxInput(session, "rotate_plot", value = presets_layout[1])
     # updateCheckboxInput(session, "no_grid", value = (presets_layout[2]))
     
     updateCheckboxInput(session, "change_scale", value = presets_layout[3])
@@ -704,7 +713,7 @@ url <- reactive({
   #as.character is necessary; if omitted TRUE is converted to 0 and FALSE to 1 which is undesired
   can <- c(input$top_x, as.character(input$show_table), a)
 
-  layout <- c(input$rotate_plot, "", input$change_scale, input$range_x, input$range_y, "X", input$plot_height, input$plot_width)
+  layout <- c("", "", input$change_scale, input$range_x, input$range_y, "X", input$plot_height, input$plot_width)
   
   #Hide the standard list of colors if it is'nt used
   if (input$adjustcolors != "5") {
@@ -777,17 +786,17 @@ observeEvent(input$settings_copy , {
 
 
   ################ List of user-selected hits #########
-df_user <- reactive({
-    
-    # usr_selection <- strsplit(input$user_label_list,",")[[1]]
-    
-    usr_selection <- input$user_label_list
-    
-    df <- as.data.frame(df_filtered())
-
-    df <- df %>% filter(Name %in% usr_selection)
-
-  })
+# df_user <- reactive({
+#     
+#     # usr_selection <- strsplit(input$user_label_list,",")[[1]]
+#     
+#     usr_selection <- input$user_label_list
+#     
+#     df <- as.data.frame(df_filtered())
+# 
+#     df <- df %>% filter(Name %in% usr_selection)
+# 
+#   })
   
   
   
@@ -798,8 +807,6 @@ df_filtered <- reactive({
 
     x_choice <- input$x_var
     y_choice <- input$y_var
-
-
 
       koos <- df %>% select(`Measurement_1` = !!x_choice , `Measurement_2` = !!y_choice)
 
@@ -827,13 +834,13 @@ df_filtered <- reactive({
     observe({(print(head(koos)))})
     
     #Update the gene list for user selection
-    updateSelectizeInput(session, "user_label_list", choices = koos$Name, selected = genelist.selected)
+    # updateSelectizeInput(session, "user_label_list", choices = koos$Name, selected = genelist.selected)
   
     
     
     ########## SOME STATISTICAL EVALUATION OF THE DATA ##########
     # Test the difference for normality
-    test_result <- shapiro.test(koos$Difference)
+    test_result <- shapiro.test(koos$y)
     observe({print(test_result$p.value)})
 
 ##    koos <- koos %>%mutate(Change = ifelse((foldchange >= foldchange_tr && pvalue >= pvalue_tr ),"Increased", ifelse(foldchange<=-foldchange_tr , "Decreased", "Unchanged")))
@@ -854,95 +861,115 @@ df_stats <- reactive({
 
   df <- df_filtered()
   
-  avg <- mean(df$y)
-  stdev <- sd(df$y)
-  
-  LoA_hi <- avg + 1.96* stdev
-  LoA_lo <- avg - 1.96* stdev
-  
   n <- length(df$y)
-  SE_d <- stdev / sqrt(n - 1)
-  SE_stdev <- 1.71*SE_d
   
-  mean_CI_lo = avg + qt((1-0.95)/2, n - 1) * SE_d
-  mean_CI_hi = avg - qt((1-0.95)/2, n - 1) * SE_d
+  if (input$LoA != '3') {
+    diff <- mean(df$y)
+    stdev <- sd(df$y)
+    LoA_hi <- diff + 1.96* stdev
+    LoA_lo <- diff - 1.96* stdev
+    
+    # Approximate standard error of the standard deviation; source: Bland&Altman (1999)
+    SE_d <- stdev / sqrt(n - 1)
+    SE_stdev <- 1.71*SE_d
+    
+    mean_CI_lo = diff + qt((1-0.95)/2, n - 1) * SE_d
+    mean_CI_hi = diff - qt((1-0.95)/2, n - 1) * SE_d
+    
+    LoA_hi_CI_lo = LoA_hi + qt((1-0.95)/2, n - 1)*SE_stdev
+    LoA_hi_CI_hi = LoA_hi - qt((1-0.95)/2, n - 1)*SE_stdev
+    
+    LoA_lo_CI_lo = LoA_lo + qt((1-0.95)/2, n - 1)*SE_stdev
+    LoA_lo_CI_hi = LoA_lo - qt((1-0.95)/2, n - 1)*SE_stdev
+    
+    df_difference <- data.frame(parameter=c('difference', 'upper Limit of Agreement', 'lower Limit of Agreement'),Value=c(diff,LoA_hi, LoA_lo), lo=c(mean_CI_lo,LoA_hi_CI_lo,LoA_lo_CI_lo),hi=c(mean_CI_hi,LoA_hi_CI_hi,LoA_lo_CI_hi))
+    
   
-  LoA_hi_CI_lo = LoA_hi + qt((1-0.95)/2, n - 1)*SE_stdev
-  LoA_hi_CI_hi = LoA_hi - qt((1-0.95)/2, n - 1)*SE_stdev
+  }
+  else if (input$LoA == '3') {
+    diff <- median(df$y)
+    LoA_hi <- quantile(df$y, probs=0.95)
+    
+    LoA_lo <- quantile(df$y, probs=0.05)
+    # observe({print(LoA_hi, LoA_lo)})
+    
+
+    # Bootstrap to determine median, and the 90% coverage that reflects the LoA
+    df_boot <-  as.data.frame(t(replicate(nrep, boot_LoA(df$y))))
+    
+    # 95%CI of the median
+    median_CI <- quantile(df_boot$`50%`, probs=c(0.025,0.975))
+    
+    LoA_lo_CI <- quantile(df_boot$`5%`, probs=c(0.025,0.975))
+    
+    LoA_hi_CI <- quantile(df_boot$`95%`, probs=c(0.025,0.975))
+    
+    ###### NEED TO ADD 95%CI for Median and LoA #######
+    # Draw median 1000x from bootstrapping, calculate percentiles as well:     boot_value <- quantile(new_sample, probs=c(0.05,0.5,0.95))
+    
+    df_difference <- data.frame(parameter=c('difference', 'upper Limit of Agreement', 'lower Limit of Agreement'),Value=c(diff,LoA_hi, LoA_lo), lo=c(median_CI[1],LoA_hi_CI[1],LoA_lo_CI[1]), hi=c(median_CI[2],LoA_hi_CI[2],LoA_lo_CI[2]))
+    
+  }
+  # rownames(df_difference) <- NULL
+  observe({print(df_difference)})
   
-  LoA_lo_CI_lo = LoA_lo + qt((1-0.95)/2, n - 1)*SE_stdev
-  LoA_lo_CI_hi = LoA_lo - qt((1-0.95)/2, n - 1)*SE_stdev
-  
-  
-  df_difference <- data.frame(parameter=c('difference', 'upper Limit of Agreement', 'lower Limit of Agreement'),avg=c(avg,LoA_hi, LoA_lo), lo=c(mean_CI_lo,LoA_hi_CI_lo,LoA_lo_CI_lo),hi=c(mean_CI_hi,LoA_hi_CI_hi,LoA_lo_CI_hi))
   
   linearMod <- lm(y ~ Average, data=df)
-  
-  df_coef <- data.frame(parameter=c('intercept', 'slope'),avg=linearMod$coefficients)
-  # Calculate the CI of intercept and slope
   x <- confint(linearMod, level=0.95)
-  df_x <- (data.frame(lo=x[,1], hi=x[,2]))
-  df_coef <- bind_cols(df_coef,df_x)
   
+
+  intercept_lo <-  x[1,1]
+  intercept_hi<-  x[1,2]
+  slope_lo <- x[2,1]
+  slope_hi <- x[2,2] 
+  
+  intercept <- linearMod$coefficients[1]
+  slope <- linearMod$coefficients[2]
+  
+
+  df_coef <- data.frame(parameter=c('intercept', 'slope'),Value=c(intercept, slope), lo=c(intercept_lo, slope_lo), hi=c(intercept_hi,slope_hi))
+  # Calculate the CI of intercept and slope
+
+  # df_x <- (data.frame(lo=x[,1], hi=x[,2]))
+  # df_coef <- bind_cols(df_coef,df_x)
+  
+  observe({print(df_coef)})
+  
+
   df_coef <- bind_rows(df_difference,df_coef)
   df_coef <- data.frame(df_coef, row.names = 1)
-  df_coef <- round(df_coef,2)
-  # observe({print(df_coef)})
+
+
   return(df_coef)
   
 })  
-  
 
-# A queue of notification IDs
-ids <- character(0)
-# A counter
-n <- 0
-
-# observeEvent(input$plot_type, {
-#   # Save the ID for removal later
-#   
-#    # df <- df_stats()
-# 
-#    if (input$LoA=='1') {
-# 
-#   if (length(ids) > 0) {
-#     removeNotification(ids[1])
-#     ids <<- ids[-1]}
-#   
-#   id <- showNotification(paste("Plot type", "xxx"), duration = 10, type = "warning")
-#   ids <<- c(ids, id)
-#   n <<- n + 1
-#   
-#   # If LoA are ordinary && slope <>0 -> regression based analysis
-#   
-#    }
-# })
 
 
 
 output$data_summary <- renderDataTable(
   datatable(
-    df_stats(),
-    #  colnames = c(ID = 1),
+    df_filtered_stats(),
+     colnames = c("Parameter","Value","95%CI lower limit","95%CI upper limit"),
     selection = 'none',
     extensions = c('Buttons', 'ColReorder'),
     options = list(dom = 'Bfrtip', pageLength = 100,
                    buttons = c('copy', 'csv','excel', 'pdf'),
-                   editable=FALSE, colReorder = list(realtime = FALSE), columnDefs = list(list(className = 'dt-center', targets = '_all'))
+                   editable=FALSE, colReorder = list(realtime = FALSE), columnDefs = list(list(className = 'dt-center', targets = 1:3))
     ) 
   ) 
-  #   %>% formatRound(n, digits=0)
+     %>% formatRound(columns = names(df_filtered_stats()), digits=input$digits_table)
 ) 
 
 
 ############## Render the data summary as a table ###########
   
-output$toptable <- renderTable({
-    
-    if (input$show_table == F) return(NULL)
-    df <- as.data.frame(df_user())
-    
-  })
+# output$toptable <- renderTable({
+#     
+#     if (input$show_table == F) return(NULL)
+#     df <- as.data.frame(df_user())
+#     
+#   })
 
   
   ##### Render the plot ############
@@ -957,6 +984,14 @@ output$toptable <- renderTable({
   }
   )
 
+df_filtered_stats <- reactive({
+    df <- df_stats()
+    if (input$LoA=='2')
+    df <- df[-c(2,3),]
+    return(df)
+    
+  })
+  
   
 plotdata <- reactive({
   
@@ -965,6 +1000,18 @@ plotdata <- reactive({
   df$Change <- factor(df$Change, levels=c("Unchanged","Increased","Decreased"))
 
 
+  df_stats <- as.data.frame(df_stats())
+  
+  slope_CI_lo = round(df_stats[5,2],2)
+  slope_CI_hi = round(df_stats[5,3],2)
+  
+  #95CI of Slope != 0
+  if ((slope_CI_lo > 0 && slope_CI_hi > 0) || (slope_CI_lo < 0 && slope_CI_hi < 0)) {
+    showNotification(paste("The slope of the difference has a 95%CI [",slope_CI_lo,",",slope_CI_hi,"] that does not include zero suggesting proportional bias: using a regression-based LoA is recommended"), duration = 100, type = "warning")
+  }
+  
+  
+  
   ########## Determine color use #############
   newColors <- c("black", "red", "blue")
   if (input$adjustcolors == 3) {
@@ -1022,36 +1069,27 @@ plotdata <- reactive({
       rng_y <- c(NULL,NULL)
     }
   
+  
+  avg <- df_stats[1,1]
 
   # Calculate Stats for y-variable
-  avg <- mean(df$y)
-  stdev <- sd(df$y)
+  # avg <- mean(df$y)
+  # stdev <- sd(df$y)
   
-  LoA_hi <- avg + 1.96* stdev
-  LoA_lo <- avg - 1.96* stdev
+  LoA_hi <- df_stats[2,1]
+  LoA_lo <- df_stats[3,1]
   
   n <- length(df$y)
   
-  # Standard error of the difference
-  SE_d <- stdev / sqrt(n - 1)
-  # Approximate standard error of the standard deviation; source: Bland&Altman (1999)
-  SE_stdev <- 1.71*SE_d
+  mean_CI_lo = df_stats[1,2]
+  mean_CI_hi = df_stats[1,3]
   
-  mean_CI_lo = avg + qt((1-0.95)/2, n - 1) * SE_d
-  mean_CI_hi = avg - qt((1-0.95)/2, n - 1) * SE_d
+  LoA_hi_CI_hi = df_stats[2,3]
+  LoA_hi_CI_lo = df_stats[2,2]
   
-  LoA_hi_CI_hi = LoA_hi + qt((1-0.95)/2, n - 1)*SE_stdev
-  LoA_hi_CI_lo = LoA_hi - qt((1-0.95)/2, n - 1)*SE_stdev
+  LoA_lo_CI_hi = df_stats[3,3]
+  LoA_lo_CI_lo = df_stats[3,2]
   
-  LoA_lo_CI_hi = LoA_lo + qt((1-0.95)/2, n - 1)*SE_stdev
-  LoA_lo_CI_lo = LoA_lo - qt((1-0.95)/2, n - 1)*SE_stdev
-  
-  
-  
-
-  
-  
-
     # Define the plotting object    
     p <-  ggplot(data = df)
 
@@ -1062,19 +1100,15 @@ plotdata <- reactive({
       x <- round(confint(linearMod, level=0.95),2)
       y <- (data.frame(lo=x[,1], hi=x[,2]))
       
-      if(input$add_CI ==TRUE && input$LoA=='1') {
+      
+      if(input$add_CI ==TRUE && (input$LoA=='1' || input$LoA=='3')) {
 
           p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=mean_CI_hi,ymin=mean_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
           p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=LoA_hi_CI_hi,ymin=LoA_hi_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
           p <- p + annotate("rect", xmin=-Inf, xmax=Inf, ymax=LoA_lo_CI_hi,ymin=LoA_lo_CI_lo, fill='grey80',alpha=input$alphaInput_summ) 
       }
       
-      if (input$LoA =='1') {
-        
-        #95CI of Slope != 0
-        if ((y$lo[2] > 0 && y$hi[2] > 0) || (y$lo[2] < 0 && y$hi[2] < 0)) {
-          showNotification(paste("The slope of the difference has a 95%CI [",y$lo[2],",",y$hi[2],"] that does not include zero suggesting proportional bias: using a regrression-based LoA is recommended"), duration = 10, type = "warning")
-        }
+      if (input$LoA =='1' || input$LoA =='3') {
       
       p <- p + geom_hline(yintercept = 0, linetype="solid", color="grey", size=0.5)
       
@@ -1122,9 +1156,8 @@ plotdata <- reactive({
       # p <- p + scale_y_continuous(breaks=c(0, 10, 15, -10))
       # Label average and LoA on secondary axis
       
-      if (input$show_labels) {
+      if (input$show_labels && (input$LoA =='1' || input$LoA =='3')) {
       p <- p + scale_y_continuous(sec.axis = sec_axis(~ . * 1  , breaks = (round(c(avg, LoA_hi, LoA_lo),input$digits))))
-      #Indicate cut-offs with dashed lines
       }
     
         
@@ -1164,7 +1197,7 @@ plotdata <- reactive({
     
     p <- p + coord_cartesian(xlim=c(rng_x[1],rng_x[2]),ylim=c(rng_y[1],rng_y[2]))
     #### If selected, rotate plot 90 degrees CW ####
-    if (input$rotate_plot == TRUE) { p <- p + coord_flip(xlim=c(rng_x[1],rng_x[2]),ylim=c(rng_y[1],rng_y[2]))}
+    # if (input$rotate_plot == TRUE) { p <- p + coord_flip(xlim=c(rng_x[1],rng_x[2]),ylim=c(rng_y[1],rng_y[2]))}
     ########## Do some formatting of the lay-out ##########
     
     
@@ -1179,6 +1212,9 @@ plotdata <- reactive({
       observe({print('yay')})
       p <- p + labs(title = title)
     }
+    
+    if (input$align == TRUE)
+      p <- p + theme(plot.title = element_text(hjust = 0.5))
     
     # # if labels specified
     if (input$label_axes)
@@ -1231,53 +1267,58 @@ plotdata <- reactive({
   
   
   ###### Figure legend #########
-  Fig_legend <- renderText({
+Fig_legend <- renderText({
     
     df <- as.data.frame(df_filtered())
     
-    if (input$rotate_plot == FALSE) {
+    # if (input$rotate_plot == FALSE) {
       x <- "horizontal"
       y <- "vertical"
-    }
-    else if (input$rotate_plot == TRUE) {
-      x <- "vertical"
-      y <- "horizontal"
-    }
+    # }
+    # else if (input$rotate_plot == TRUE) {
+    #   x <- "vertical"
+    #   y <- "horizontal"
+    # }
     n <- length(df$Difference)
     
     
+    avg <- mean((df$y))
+    avg_round <- round(avg,input$digits)
+    stdev <- sd((df$y))
+    test_result <- shapiro.test(df$y)
+    
   if (input$plot_type==1) {
-      # Calculate Stats
-      avg <- mean(df$Difference)
-      stdev <- sd(df$Difference)
-      test_result <- shapiro.test(df$Difference)
       y_var <- c("difference")
       
   } else if (input$plot_type==2) {
-    avg <- mean((df$Percentage))
-    stdev <- sd((df$Percentage))
-    
-    test_result <- shapiro.test(df$Difference)
     y_var <- c("percentage difference")
 
   } else if (input$plot_type==3) {
-    avg <- mean(log2(df$Ratio))
-    stdev <- sd(log2(df$Ratio))
-    test_result <- shapiro.test(log2(df$Ratio))
     y_var <- c("difference between log2 transformed data (which is identical to the log2 of the ratio)")
 
   }
 
     if (input$plot_type!=5) {
-    pvalue <- round(test_result$p.value,3)
-    if (pvalue==0) {pvalue <- c("<0.001")}
-    
-    LoA_hi <- avg + 1.96* stdev
-    LoA_lo <- avg - 1.96* stdev
-    limits <- round(c(LoA_lo,LoA_hi),input$digits)
+    pvalue <- round(test_result$p.value,4)
+    if (pvalue==0) {pvalue <- c("<0.0001")}
     
 
-    stats <- paste("dotted line indicates the average",y_var," and the dashed lines indicate the Limits of Agreement:",limits[1], "&", limits[2],sep=" ")
+    ##################################################    
+    ######## Take values from df_stats here ##########
+    ##################################################
+    df_stats <- df_stats() 
+    
+    
+    LoA_hi <- df_stats[2,1]
+    LoA_lo <- df_stats[3,1]
+    
+    limits <- round(c(LoA_lo,LoA_hi),input$digits)
+    
+    if (input$LoA =='1' || input$LoA =='3') {
+    stats <- paste("dotted line indicates the average",y_var," of ",avg_round," and the dashed lines indicate the Limits of Agreement:",limits[1], "&", limits[2],sep=" ")
+    } else if (input$LoA =='2') {
+      stats <- paste("dotted line indicates the difference and the dashed lines indicate the Limits of Agreement (LoA). Both the difference and LoA are based on regression analysis. ",sep=" ")
+    }
 
       if (pvalue <0.05) {
         stats <- paste(stats,"The Shapiro-Wilk test of the difference returns a p-value of",pvalue,"which does NOT support a normal distribution.", sep=" ")
@@ -1299,7 +1340,7 @@ plotdata <- reactive({
     
     Legend<-append(Legend, paste("The ", stats, sep=""))
     
-    if (input$add_CI==TRUE && input$plot_type!=5){
+    if (input$add_CI==TRUE && input$plot_type!=5 && input$LoA =='1' ){
       
       Legend<-append(Legend, paste("The grey bands (visibility: ", input$alphaInput_summ, ") reflect the 95% confidence intervals. ", sep=""))
     }
@@ -1338,7 +1379,49 @@ plotdata <- reactive({
   })
   
   
-  
+  output$stats <- renderText({
+    
+    #### Check for normality of the y-variable
+    df <- df_filtered()
+    
+    avg <- mean(df$Average)
+    
+    #Average of the within sum of squares
+    sum_sqrs <- sum((df$Measurement_1-df$Average)^2+(df$Measurement_2-df$Average)^2)/length(df$Average)
+    
+    rep <- sqrt(sum_sqrs)*2.77
+
+    rep <- rep/length(df$Average)*100
+
+    
+    rep <- round(rep, 1)
+    
+
+    
+    test_result <- shapiro.test(df$y)
+    pvalue <- (test_result$p.value)
+    
+    if (pvalue <0.05 && input$LoA==1) {
+      showNotification(paste("The Shapiro-Wilk test for normality yields a p-value <0.05, suggesting that an ordinary analysis is unsuitable. Data transformation and/or a regression or non-parametric analysis may be more suitable"), duration = 100, type = "warning")
+    }
+    
+    
+    
+    # if (pvalue==0) {pvalue <- c("<0.001")}
+
+    HTML_Legend <- c('</br></br><h4>Statistics of the distribution</h4>')
+    
+    #The width of the legend (style as a paragraph between <p></p>) is adjusted to the width of the plot
+    
+    # HTML_Legend <-append(HTML_Legend, paste('<p style="width:',input$plot_width,'px;padding: 0px 15px 0px 40px">', sep=""))
+    
+    HTML_Legend <- append(HTML_Legend, paste('<p>The Shapiro-Wilk test for normality of the distribution of the y-variable returns a p-value of ',formatC(pvalue, format = "e", digits = 2), sep=""))
+    
+    HTML_Legend <- append(HTML_Legend, paste('</br>The coefficient of reproducibility is ',rep,' %', sep=""))
+    # HTML_Legend <- append(HTML_Legend, paste('</br>The repeatability coefficient of measurement 2 is ',rep_2, sep=""))    
+    HTML_Legend <- append(HTML_Legend, paste("</p>"))
+    
+  })
   
   
   

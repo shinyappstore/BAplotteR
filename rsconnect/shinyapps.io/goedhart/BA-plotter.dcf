@@ -5,9 +5,9 @@ account: goedhart
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 2350164
-bundleId: 3252229
+bundleId: 3361423
 url: https://goedhart.shinyapps.io/BA-plotter/
-when: 1591800988.30897
+when: 1594108376.07319
 asMultiple: FALSE
 asStatic: FALSE
 ignoredFiles: LICENSE|README.md
