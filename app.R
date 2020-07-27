@@ -74,8 +74,10 @@ ui <- fluidPage(
                            list(
                              "BA, y-axis: Difference [absolute]" = 1,
                              "BA, y-axis: Difference/Average [percentage]" = 2,
-                             "BA, y-axis: Difference of log2 transformed data" = 3,
-                             "Correlation (Measurement_2 vs. Measurement_1)"=5),
+                             "BA, y-axis: Difference of log2 transformed data" = 3
+                             # "Correlation (Measurement_2 vs. Measurement_1)"=5,
+                             
+                         ),
                          selected =  1),
             sliderInput("pointSize", "Size of the datapoints", 0, 10, 4),  
             
@@ -276,6 +278,7 @@ ui <- fluidPage(
               
               selectInput("x_var", label = "Measurement 1", choices = "-"),
               selectInput("y_var", label = "Measurement 2", choices = "-"),
+              textInput("unit", "Units of the variables (optional)", value = ""), 
               # selectInput("g_var", label = "Select column with names", choices = "-"),
               
               hr(),
@@ -1216,10 +1219,34 @@ plotdata <- reactive({
     if (input$align == TRUE)
       p <- p + theme(plot.title = element_text(hjust = 0.5))
     
-    # # if labels specified
-    if (input$label_axes)
-      p <- p + labs(x = input$lab_x, y = input$lab_y)
+    # if labels specified
+    if (input$unit !="") {
+      unit <- paste0("(",input$unit,")")
+    } else {unit <- NULL}
     
+    
+    if (input$label_axes) {
+      p <- p + labs(x = input$lab_x, y = input$lab_y)
+    } else {
+      x_label <- paste0("Average of ",input$x_var, " and " , input$y_var ," ",unit)
+      
+      if (input$plot_type==1){
+      y_label <- paste("Difference:",input$x_var, "-" , input$y_var, unit)
+      }
+      if (input$plot_type==2){
+        y_label <- paste("% Difference (Difference/Average*100%)")
+      }
+      if (input$plot_type==3){
+        y_label <- paste("Difference of the log2 transformed data")
+      }
+      if (input$plot_type==5){
+        y_label <- paste(input$y_var, unit)
+        x_label <- paste(input$x_var, unit)
+      }
+      
+      p <- p + labs(x = x_label, y = y_label)
+      
+    }
     # # if font size is adjusted
     if (input$adj_fnt_sz) {
       p <- p + theme(axis.text = element_text(size=input$fnt_sz_ax))
