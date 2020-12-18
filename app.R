@@ -26,15 +26,6 @@ boot_LoA = function(x) {
 #number of replicates for bootstrap
 nrep = 500
 
-# ToDo:
-
-# Table with LoA
-# implement plotting of percentage difference
-# Check normality
-# regression analysis
-# Guidance of users -> summary/report
-
-
 
 # Allow files up to 10 Mb
 options(shiny.maxRequestSize=10*1024^2)
@@ -45,8 +36,6 @@ library(shiny)
 library(ggplot2)
 library(magrittr)
 library(dplyr)
-library(ggrepel)
-library(shinycssloaders)
 library(readxl)
 library(DT)
 library(RCurl)
@@ -103,37 +92,7 @@ ui <- fluidPage(
                           value = FALSE),
             sliderInput("alphaInput_summ", "Visibility of the statistics", 0, 1, 1),
             
-            
-            #   selectInput("geom", label = NULL, choices = list("geom_point"="geom_point", "-"="-")),
-            # conditionalPanel(condition = "input.geom=='geom_line'",  
-            # selectInput('grouping', label="Group", choices = list("-"="-"), selected = "-")
-            # ),
 
-
-
-            # hr(),
-
-            # sliderInput("fc_cutoff", "Fold Change threshold:", -5, 5, step=0.1, value = c(-1.5,1.5)),
-            # sliderInput("p_cutoff", "Significance threshold:", 0, 5, step=0.1, value = 2),
-            # selectInput("direction", label="Use thresholds to annotate:", choices = list("All (ignores thresholds)"="all", "Changed (and significant)"="significant","Increased (and significant)"="increased", "Decreased (and significant)"="decreased"), selected ="significant"),
-            
-            # selectInput("criterion", label="Criterion for ranking hits:", choices = list("Manhattan distance"="manh", "Euclidean distance"="euclid","Fold change"="fc","Significance"="sig"), selected ="manh"),
-            # 
-            # 
-            # numericInput("top_x", "Number of top hits (0 to hide):", value = 10),
-            
-            # textInput("user_label_list2", "Selected hits (names separated by commas, e.g. DOK6,TBX5)", value = ""), 
-            
-            # selectizeInput(inputId = 'user_label_list',
-            #                label = "Choose from list:",
-            #                choices = "-",
-            #               selected = "-",
-            #                multiple = TRUE, # allow for multiple inputs
-            #                 options = list(create = TRUE)), # if TRUE, allows newly created inputs
-           
-            # checkboxInput(inputId = "show_table",
-            #               label = "Show table with hits",
-            #               value = FALSE),
             checkboxInput(inputId = "show_labels",
                           label = "Label limits on secondary y-axis",
                           value = FALSE),
@@ -223,8 +182,6 @@ ui <- fluidPage(
                           label = "Add figure description",
                           value = FALSE),
 
-            
-            
               NULL),
           
           
@@ -241,6 +198,7 @@ ui <- fluidPage(
                   list("Example data 1" = 1,
                        "Example data 2" = 2,
                        "Upload file (CSV, text, excel)" = 3,
+                       "Paste data" = 4,
                        "URL (CSV files only)" = 5
                   )
                 ,
@@ -267,6 +225,23 @@ ui <- fluidPage(
 
 
                 ),
+              
+              conditionalPanel(
+                condition = "input.data_input=='4'",
+                h5("Paste data below:"),
+                tags$textarea(id = "data_paste",
+                              placeholder = "Add data here",
+                              rows = 10,
+                              cols = 20, ""),
+                actionButton("submit_data_button", "Submit data"),
+                radioButtons(
+                  "text_delim", "Delimiter",
+                  choices = 
+                    list("Tab (from Excel)" = "\t",
+                         "Space" = " ",
+                         "Comma" = ",",
+                         "Semicolon" = ";"),
+                  selected = "\t")),
               ### csv via URL as input      
               conditionalPanel(
                 condition = "input.data_input=='5'",
@@ -289,15 +264,11 @@ ui <- fluidPage(
           conditionalPanel(
             condition = "input.tabs=='Data Summary'",
             h4("Data summary"),
-            # checkboxGroupInput("stats_select", label = h5("Statistics for table:"), 
-            #                    choices = list("mean", "sd", "sem","95CI mean", "median", "MAD", "IQR", "Q1", "Q3", "95CI median"),
-            #                    selected = "sem"),
-            # actionButton('select_all1','select all'),
-            # actionButton('deselect_all1','deselect all'),
+
             numericInput("digits_table", "Digits:", 2, min = 0)
-            #        ,
-            #        selectInput("stats_hide2", "Select columns to hide", "", multiple = TRUE, choices=list("mean", "sd", "sem","95CI mean", "median", "MAD", "IQR", "Q1", "Q3", "95CI median")
-          ) ,
+
+            
+            ),
           
           
           
@@ -333,10 +304,6 @@ ui <- fluidPage(
                              plotOutput("coolplot",
                                         height = 'auto'),htmlOutput("LegendText", width="200px", inline =FALSE),
                              
-                            #  conditionalPanel(
-                            #    condition = "input.show_table == true",
-                            # h3("Top hits (based on Manhattan distance from origin)")),
-                            #  withSpinner(tableOutput('toptable')),
                             NULL
 
                               ),
@@ -356,15 +323,11 @@ ui <- fluidPage(
 server <- function(input, output, session) {
   
   # Session variable - initialize defaults
-  genelist.selected <- ""
   x_var.selected <- "x"
   y_var.selected <- "y"
   g_var.selected <- ""
   sheet.selected <- " "
   
-  # transform_var_x.selected <- "-"
-  # transform_var_y.selected <- "-"  
-
   isolate(vals$count <- vals$count + 1)
   ###### DATA INPUT ###################
   
@@ -374,27 +337,15 @@ df_upload <- reactive({
       x_var.selected <<- "J1"
       y_var.selected <<- "S1"
       g_var.selected <<- "Subject"
-      genelist.selected <<- ""
-      # updateCheckboxInput(session, "transformation", value = FALSE)
-      # transform_var_x.selected <<- "-"
-      # transform_var_y.selected <<- "-"
-
       data <- df_example_1
+
     } else if (input$data_input == 2) {
       x_var.selected <<- "T4X"
       y_var.selected <<- "T4A"
       g_var.selected <<- "Subject"
-      genelist.selected <<- ""
-      # updateCheckboxInput(session, "transformation", value = FALSE)
-      # transform_var_x.selected <<- "-"
-      # transform_var_y.selected <<- "-"
 
       data <- df_example_3
     } else if (input$data_input == 3) {
-      genelist.selected <<- ""
-      # updateCheckboxInput(session, "transformation", value = FALSE)
-      # transform_var_x.selected <<- "-"
-      # transform_var_y.selected <<- "-"
       file_in <- input$upload
       # Avoid error message while file is not uploaded yet
       if (is.null(input$upload)) {
@@ -407,11 +358,6 @@ df_upload <- reactive({
         filename_split <- strsplit(file_in$datapath, '[.]')[[1]]
         fileext <- tolower(filename_split[length(filename_split)])
         
-        # observe({print(fileext)})
-        
-        # isolate({
-           # data <- read.csv(file=file_in$datapath, sep = input$upload_delim, na.strings=c("",".","NA", "NaN", "#N/A", "#VALUE!"))
-          
           if (fileext == "txt" || fileext=="csv") {
             
             data <- read.csv(file=file_in$datapath, sep = input$upload_delim, na.strings=c("",".","NA", "NaN", "#N/A", "#VALUE!"))
@@ -432,20 +378,38 @@ df_upload <- reactive({
               updateSelectInput(session, "sheet", choices = names)
             }
             
-            # names <- excel_sheets(path = input$upload$datapath)
-            # updateSelectInput(session, "sheet_names", choices = names)
             data <- read_excel(file_in$datapath, sheet = n , na = c("",".","NA", "NaN", "#N/A", "#VALUE!"))
           } 
           
         # })
       }
       
-    } else if (input$data_input == 5) {
-      genelist.selected <<- ""
-      # updateCheckboxInput(session, "transformation", value = FALSE)
-      # transform_var_x.selected <<- "-"
-      # transform_var_y.selected <<- "-"
       
+    } else if (input$data_input == 4) {
+      x_var.selected <<- ""      
+      y_var.selected <<- ""
+      g_var.selected <<- "" 
+      if (input$data_paste == "") {
+        data <- data.frame(x = "Copy your data into the textbox,
+                           select the appropriate delimiter, and
+                           press 'Submit data'")
+      } else {
+        if (input$submit_data_button == 0) {
+          return(data.frame(x = "Press 'submit data' button"))
+        } else {
+          # isolate({
+            data <- read_delim(input$data_paste,
+                               delim = input$text_delim,
+                               col_names = TRUE)
+          # })
+        }
+      }
+    
+  
+      
+      
+    } else if (input$data_input == 5) {
+
       #Read data from a URL
       #This requires RCurl
       if(input$URL == "") {
@@ -458,6 +422,9 @@ df_upload <- reactive({
   
   #Replace space and dot of header names by underscore
   data <- data %>% select_all(~gsub("\\s+|\\.", "_", .))
+  
+  #Change empty cells to NA
+  
     return(data)
   })
   
@@ -466,7 +433,7 @@ df_upload <- reactive({
   
 output$data_uploaded <- renderDataTable(
     
-    #    observe({ print(input$tidyInput) })
+
     df_upload(),
     # df_transformed(),
     rownames = FALSE,
@@ -475,62 +442,22 @@ output$data_uploaded <- renderDataTable(
     editable = FALSE,selection = 'none'
   )
   
-
-  ############## Export Normalized data in tidy format ###########
-  
-  # output$downloadTransformedData <- downloadHandler(
-  #   
-  #   filename = function() {
-  #     paste("VolcaNoseR_transformed", ".csv", sep = "")
-  #   },
-  #   content = function(file) {
-  #       write.csv(df_transformed(), file, row.names = FALSE)
-  #   }
-  # )
-  
-
-  ##### Get Variables from the input ##############
+##### Get Variables from the input ##############
   
 observe({
   
-  #Retrieve the currently selected geom and use as default, even when y_var changes
-
-
-  
-  # if (input$transformation != TRUE) {
     df <- df_upload()
-  # } else if (input$transformation == TRUE) {
-  #   transform_var_x.selected <<- input$transform_var_x
-  #   transform_var_y.selected <<- input$transform_var_y
-  #  df <- df_transformed() 
-  # }
-  
-  
     var_names  <- names(df)
 
     # Get the names of columns that are factors.
     nms_fact <- names(Filter(function(x) is.factor(x) || is.integer(x) || is.logical(x) || is.character(x), df))
     nms_var <- names(Filter(function(x) is.integer(x) || is.numeric(x) || is.double(x), df))
     nms_fact <- c("-",nms_fact)
-
-
-    # Pre-selection works well when example 1 or 2 is selected, but may interfere with URL-loading 
-    # updateSelectInput(session, "x_var", choices = nms_var, selected = "log2_FoldChange")
-    # updateSelectInput(session, "y_var", choices = nms_var, selected = "minus_log10_pvalue")
-    
     
     updateSelectInput(session, "x_var", choices = nms_var, selected = x_var.selected)
     updateSelectInput(session, "y_var", choices = nms_var, selected = y_var.selected)
-    
-    # updateSelectInput(session, "map_size", choices = mapping_list_all)
-   updateSelectInput(session, "g_var", choices = nms_fact, selected = g_var.selected)
+    updateSelectInput(session, "g_var", choices = nms_fact, selected = g_var.selected)
    
-   updateSelectizeInput(session, "user_label_list", selected = genelist.selected)
-   
-   # updateSelectInput(session, "transform_var_x", choices = c("-",nms_var), selected = transform_var_x.selected)
-   # updateSelectInput(session, "transform_var_y", choices = c("-",nms_var), selected = transform_var_y.selected)   
-   
-
   })
   
   
@@ -606,7 +533,6 @@ observe({
     # updateCheckboxInput(session, "user_selected", value= presets_can[4])
     # updateTextInput(session, "user_label_list", value= presets_can[4])
     
-    genelist.selected <<- unlist(strsplit(presets_can[4],","))
 
   }
   
@@ -769,8 +695,8 @@ url <- reactive({
   
     preset_URL <- paste(base_URL, parameters, sep="?")
   
-  observe(print(parameters))
-  # observe(print(preset_URL))  
+  # observe(print(parameters))
+
   return(preset_URL)
 })
 
@@ -781,40 +707,23 @@ observeEvent(input$settings_copy , {
   showModal(urlModal(url=url(), title = "Use the URL to launch VolcaNoseR with the current setting"))
 })
 
-# observeEvent(input$legend_copy , {
-#   showModal(urlModal(url=Fig_legend(), title = "Legend text"))
-# })
-
-
-
-
-  ################ List of user-selected hits #########
-# df_user <- reactive({
-#     
-#     # usr_selection <- strsplit(input$user_label_list,",")[[1]]
-#     
-#     usr_selection <- input$user_label_list
-#     
-#     df <- as.data.frame(df_filtered())
-# 
-#     df <- df %>% filter(Name %in% usr_selection)
-# 
-#   })
-  
-  
-  
   ################ SELECT COLUMNS AND ANNOTATE CHANGES #########
 df_filtered <- reactive({     
     
       df <- df_upload()
-
-    x_choice <- input$x_var
-    y_choice <- input$y_var
+      
+      observe({print('input')})
+      observe({print(head(df))})
+      
+      x_choice <- input$x_var
+      y_choice <- input$y_var
 
       koos <- df %>% select(`Measurement_1` = !!x_choice , `Measurement_2` = !!y_choice)
+      
+      #Filter empty rows
+      koos <- koos %>% filter(Measurement_1 !="" | Measurement_2 !="")
 
-    
-    koos <- koos %>% mutate(Difference = Measurement_1-Measurement_2, Average = 0.5*Measurement_1+0.5*Measurement_2, Ratio=Measurement_1/Measurement_2, Percentage=100*Difference/(Average))
+      koos <- koos %>% mutate(Difference = Measurement_1-Measurement_2, Average = 0.5*Measurement_1+0.5*Measurement_2, Ratio=Measurement_1/Measurement_2, Percentage=100*Difference/(Average))
     
     
     if (input$plot_type==1) {
@@ -832,32 +741,15 @@ df_filtered <- reactive({
       koos$y <- koos$Measurement_2
       }
     
-    
-    
     observe({(print(head(koos)))})
-    
-    #Update the gene list for user selection
-    # updateSelectizeInput(session, "user_label_list", choices = koos$Name, selected = genelist.selected)
-  
-    
     
     ########## SOME STATISTICAL EVALUATION OF THE DATA ##########
     # Test the difference for normality
     test_result <- shapiro.test(koos$y)
     observe({print(test_result$p.value)})
 
-##    koos <- koos %>%mutate(Change = ifelse((foldchange >= foldchange_tr && pvalue >= pvalue_tr ),"Increased", ifelse(foldchange<=-foldchange_tr , "Decreased", "Unchanged")))
-
-    
-    
-    #Compatibility thing, should probably be removed.
-    koos$Change <- 'Unchanged'
-    
     return(koos)
-    #Replace space and dot of header names by underscore
-    # df <- df %>%  
-    #   select_all(~gsub("\\s+|\\.", "_", .))
-    
+
 })
   
 df_stats <- reactive({     
@@ -947,9 +839,6 @@ df_stats <- reactive({
   
 })  
 
-
-
-
 output$data_summary <- renderDataTable(
   datatable(
     df_filtered_stats(),
@@ -964,17 +853,6 @@ output$data_summary <- renderDataTable(
      %>% formatRound(columns = names(df_filtered_stats()), digits=input$digits_table)
 ) 
 
-
-############## Render the data summary as a table ###########
-  
-# output$toptable <- renderTable({
-#     
-#     if (input$show_table == F) return(NULL)
-#     df <- as.data.frame(df_user())
-#     
-#   })
-
-  
   ##### Render the plot ############
   
   
@@ -999,9 +877,6 @@ df_filtered_stats <- reactive({
 plotdata <- reactive({
   
   df <- as.data.frame(df_filtered())
-  #Convert 'Change' to a factor to keep this order, necessary for getting the colors right
-  df$Change <- factor(df$Change, levels=c("Unchanged","Increased","Decreased"))
-
 
   df_stats <- as.data.frame(df_stats())
   
@@ -1013,42 +888,15 @@ plotdata <- reactive({
     showNotification(paste("The slope of the difference has a 95%CI [",slope_CI_lo,",",slope_CI_hi,"] that does not include zero suggesting proportional bias: using a regression-based LoA is recommended"), duration = 100, type = "warning")
   }
   
-  
-  
   ########## Determine color use #############
-  newColors <- c("black", "red", "blue")
-  if (input$adjustcolors == 3) {
-    newColors <- c("grey", "darkblue", "darkgreen")
+  
+  newColors <- c("black", "","grey")
+  if (input$adjustcolors < 5) {
+    dot_color <- newColors[as.numeric(input$adjustcolors)]
+    observe({print(dot_color)})
+  } else if (input$adjustcolors == 5) {
+    dot_color <- input$user_color_list
   }
-  # else if (input$adjustcolors == 4) {
-  #   newColors <- Tol_light
-  # } else if (input$adjustcolors == 6) {
-  #   newColors <- Okabe_Ito
-  # }
-  else if (input$adjustcolors == 5) {
-    newColors <- gsub("\\s","", strsplit(input$user_color_list,",")[[1]])
-    
-    #If unsufficient colors available, repeat
-    if(length(newColors) < 3) {
-      newColors<-rep(newColors,times=(round(3/length(newColors)))+1)
-    }
-    
-    
-  }
-  
-  # Remove the color for category 'increased' when absent
-  if (("Increased" %in% df$Change) == FALSE) {
-    newColors <- newColors[c(1,3)]
-    
-  }
-  
-    # if (input$adjustcolors >1) {
-  #   newColors <- c("black")
-  # }
-  
-  
-  
-  
   
   ############## Adjust X-scaling if necessary ##########
   
@@ -1154,7 +1002,7 @@ plotdata <- reactive({
       
       p <- p +  aes(x=`Average`) +
         aes(y=`y`) +
-        geom_point(alpha = input$alphaInput, size = input$pointSize, shape = 16)
+        geom_point(alpha = input$alphaInput, size = input$pointSize, shape = 16, color=dot_color)
       
       # p <- p + scale_y_continuous(breaks=c(0, 10, 15, -10))
       # Label average and LoA on secondary axis
@@ -1179,8 +1027,6 @@ plotdata <- reactive({
       
       # This needs to go here (before annotations)
      p <- p+ theme_light(base_size = 16) +
-      aes(color=Change) + 
-        scale_color_manual(values=newColors) +
     
       #remove gridlines (if selected
       theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
@@ -1372,16 +1218,6 @@ Fig_legend <- renderText({
       Legend<-append(Legend, paste("The grey bands (visibility: ", input$alphaInput_summ, ") reflect the 95% confidence intervals. ", sep=""))
     }
     Legend <-append(Legend, paste("The number of datapoints is: " ,n, ". ",sep=""))
-    
-    
-    
-    # Legend <-append(Legend, paste(stat_inf, sep=""))
-    # 
-    # if (input$color_data ==TRUE || input$color_stats) {Legend<-append(Legend, "The color coding is indicated in the legend next to the plot. ")		}
-    # 
-    # if (input$ordered =="median") {Legend<-append(Legend, "The data are ordered according to their median value. ")		}
-    # 
-    # if (input$scale_log_10) {Legend<-append(Legend, "The values are plotted on a log10 scale. ")		}
     
     return(Legend)
     
