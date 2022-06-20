@@ -309,7 +309,9 @@ ui <- fluidPage(
 
                               ),
                     # tabPanel("iPlot", h4("iPlot"), plotlyOutput("out_plotly")),
-                    tabPanel("Data Summary",dataTableOutput('data_summary'),htmlOutput("stats", width="200px", inline =FALSE)
+                    tabPanel("Data Summary",dataTableOutput('data_summary'),htmlOutput("stats", width="200px", inline =FALSE),
+                             h4("QQ-plot:"),
+                             plotOutput("qqplot", height = 'auto')
                     ),
 
                     tabPanel("About", includeHTML("about.html"))
@@ -722,7 +724,7 @@ df_filtered <- reactive({
       koos <- df %>% select(`Measurement_1` = !!x_choice , `Measurement_2` = !!y_choice)
       
       #Filter empty rows
-      koos <- koos %>% filter(Measurement_1 !="" | Measurement_2 !="")
+      koos <- koos %>% na.omit()
 
       koos <- koos %>% mutate(Difference = Measurement_1-Measurement_2, Average = 0.5*Measurement_1+0.5*Measurement_2, Ratio=Measurement_1/Measurement_2, Percentage=100*Difference/(Average))
     
@@ -865,6 +867,11 @@ output$data_summary <- renderDataTable(
     plot(plotdata())
   }
   )
+  
+  output$qqplot <- renderPlot(width = 400, height = 400, {
+    plot(plotqq())
+  }
+  )
 
 df_filtered_stats <- reactive({
     df <- df_stats()
@@ -875,9 +882,26 @@ df_filtered_stats <- reactive({
   })
   
   
+
+plotqq <- reactive({
+  df <- as.data.frame(df_filtered())
+  p <-  ggplot(data = df)
+  p <- p +  aes(sample=`y`) + stat_qq() + stat_qq_line()
+  p <- p + theme_light(base_size = 16)
+    
+    #remove gridlines (if selected
+    # theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+    
+    
+})
+
+
+
+
 plotdata <- reactive({
   
   df <- as.data.frame(df_filtered())
+  observe({print(df)})
 
   df_stats <- as.data.frame(df_stats())
   
