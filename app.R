@@ -33,9 +33,7 @@ options(shiny.maxRequestSize=10*1024^2)
 #Load necessary packages
 
 library(shiny)
-library(ggplot2)
-library(magrittr)
-library(dplyr)
+library(tidyverse)
 library(readxl)
 library(DT)
 library(RCurl)
@@ -266,7 +264,15 @@ ui <- fluidPage(
             condition = "input.tabs=='Data Summary'",
             h4("Data summary"),
 
-            numericInput("digits_table", "Digits:", 2, min = 0)
+            numericInput("digits_table", "Digits:", 2, min = 0),
+            hr(),
+            h4("Repeatability"),
+            selectizeInput(inputId = 'repeats',
+                           label = "Select Repeats:",
+                           choices = "-",
+                           selected = "-",
+                           multiple = TRUE, # allow for multiple inputs
+                           options = list(create = TRUE)) # if TRUE, allows newly created inputs
 
             
             ),
@@ -312,6 +318,7 @@ ui <- fluidPage(
                     tabPanel("Data Summary",dataTableOutput('data_summary'),htmlOutput("stats", width="200px", inline =FALSE),
                              h4("QQ-plot:"),
                              plotOutput("qqplot", height = 'auto')
+
                     ),
 
                     tabPanel("About", includeHTML("about.html"))
@@ -328,6 +335,7 @@ server <- function(input, output, session) {
   # Session variable - initialize defaults
   x_var.selected <- "x"
   y_var.selected <- "y"
+  repeats.selected <- ""
   g_var.selected <- ""
   sheet.selected <- " "
   
@@ -339,12 +347,14 @@ df_upload <- reactive({
     if (input$data_input == 1) {
       x_var.selected <<- "J1"
       y_var.selected <<- "S1"
+      repeats.selected <<- c("J1","J2","J3")
       g_var.selected <<- "Subject"
       data <- df_example_1
 
     } else if (input$data_input == 2) {
       x_var.selected <<- "T4X"
       y_var.selected <<- "T4A"
+      repeats.selected <<- ""
       g_var.selected <<- "Subject"
 
       data <- df_example_3
@@ -391,7 +401,8 @@ df_upload <- reactive({
     } else if (input$data_input == 4) {
       x_var.selected <<- ""      
       y_var.selected <<- ""
-      g_var.selected <<- "" 
+      g_var.selected <<- ""
+      repeats.selected <<- ""
       if (input$data_paste == "") {
         data <- data.frame(x = "Copy your data into the textbox,
                            select the appropriate delimiter, and
@@ -460,6 +471,7 @@ observe({
     updateSelectInput(session, "x_var", choices = nms_var, selected = x_var.selected)
     updateSelectInput(session, "y_var", choices = nms_var, selected = y_var.selected)
     updateSelectInput(session, "g_var", choices = nms_fact, selected = g_var.selected)
+    updateSelectizeInput(session, "repeats", choices = nms_var, selected = repeats.selected)
    
   })
   
@@ -1269,20 +1281,41 @@ Fig_legend <- renderText({
   
   output$stats <- renderText({
     
+    repeat_coeff <- c("not available (select multiple repeats)")
+    
+    if (length(input$repeats) >1) {
+    koos <- df_upload() %>% select(input$repeats) %>% pivot_longer(cols = everything(), names_to = "Replicate", values_to = "Value")
+    
+    df_id <- koos %>% group_by(Replicate) %>% mutate (Subject=row_number()) %>% ungroup()
+    
+    df_var <- df_id %>%
+      group_by(Subject) %>%
+      summarise(var = var(Value), mean = mean(Value)) %>%
+      summarise(mean_var = mean(var), mean_mean = mean(mean), var_mean=var(mean))
+    
+    df_var <- df_var %>% mutate(repeat_coeff = 1.96*sqrt(2*mean_var))
+    
+    repeat_coeff <- df_var %>% pull(repeat_coeff) %>% round(input$digits_table)
+    }
+    
+    
+    
     #### Check for normality of the y-variable
     df <- df_filtered()
     
     avg <- mean(df$Average)
     
     #Average of the within sum of squares
-    sum_sqrs <- sum((df$Measurement_1-df$Average)^2+(df$Measurement_2-df$Average)^2)/length(df$Average)
-    
-    rep <- sqrt(sum_sqrs)*2.77
-
-    rep <- rep/length(df$Average)*100
-
-    
-    rep <- round(rep, 1)
+    # sum_sqrs <- sum((df$Measurement_1-df$Average)^2+(df$Measurement_2-df$Average)^2)/length(df$Average)
+    # 
+    # rep <- sqrt(sum_sqrs)*2.77
+    # rep2 <- rep
+    # rep2 <- round(rep2, 1)
+    # 
+    # rep <- rep/length(df$Average)*100
+    # 
+    # 
+    # rep <- round(rep, 1)
     
 
     
@@ -1305,9 +1338,18 @@ Fig_legend <- renderText({
     
     HTML_Legend <- append(HTML_Legend, paste('<p>The Shapiro-Wilk test for normality of the distribution of the y-variable returns a p-value of ',formatC(pvalue, format = "e", digits = 2), sep=""))
     
-    HTML_Legend <- append(HTML_Legend, paste('</br>The coefficient of reproducibility is ',rep,' %', sep=""))
+    # if (length(input$repeats) >1) {
+      HTML_Legend <- append(HTML_Legend, paste("</br><h4>Statistics of the Repeatability</h4>"))
+    
+    # HTML_Legend <- append(HTML_Legend, paste('</br>The old coefficient of reproducibility is ',rep,' %', sep=""))
+    HTML_Legend <- append(HTML_Legend, paste('The repeatability coefficient for the selected repeats is ', repeat_coeff," ", input$unit, sep=""))
+    # } 
+    # else {
+    #   HTML_Legend <- append(HTML_Legend, paste("</br>Select multiple repeats to calculate the repeatability coefficient"))
+    # 
+    # }
     # HTML_Legend <- append(HTML_Legend, paste('</br>The repeatability coefficient of measurement 2 is ',rep_2, sep=""))    
-    HTML_Legend <- append(HTML_Legend, paste("</p>"))
+    HTML_Legend <- append(HTML_Legend, paste("</p><hr>"))
     
   })
   
