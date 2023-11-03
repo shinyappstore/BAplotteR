@@ -1,45 +1,9 @@
-# BA plotteR
-A Shiny App for making Bland-Altman plots
+![](https://shiny-app-store3.s3.amazonaws.com/approvedapp/s202_GZpFDcgHSfPlDraD2d4pdMtB6LF9zTc1BGLCvH1V_logo_251.jpg)
 
 
-### Running the App
 
-The web-tool runs from a shiny server, and can be accessed at:
+# BAplotteR: Create Bland-Altman Plots for Method Comparison
 
-o [https://huygens.science.uva.nl/BA-plotteR/](https://huygens.science.uva.nl/BA-plotteR/)
+#### Use app online: __[www.shinyappstore.com/a/BAplotteR](https://shinyappstore.com/a/BAplotteR)__
 
-o [https://goedhart.shinyapps.io/BA-plotteR/](https://goedhart.shinyapps.io/BA-plotteR/), while bandwidth lasts
-
-Alternatively, the app can run from R/Rstudio and this is perhaps the best option for loading large files. See instructions below
-
-#### Preparations
-Note that the app depends on several R packages that need to be installed (shiny, ggplot2, dplyr, magrittr, ggrepel, DT, shinycssloaders, RCurl). 
-
-Run this command in R/Rstudio to download and install all the packages (only needs to be done once):
-```
-install.packages("shiny", "ggplot2", "dplyr", "magrittr", "ggrepel", "DT", "shinycssloaders", "RCurl")
-```
-o The first option is running it directly from Github. In the command line (in R or Rstudio) type:
-```
-shiny::runGitHub('BA-plotteR', 'JoachimGoedhart')
-```
-o The second option is download the app and to use it offline:
-
--download the `app.R` and csv files with example data.
-
--Run RStudio and load `app.R`
-
--Select 'Run All' (shortcut is command-option-R on a Mac) or click on "Run App" (upper right button on the window)
-
-This should launch a web browser with the Shiny app.
-
-
-### Credits
-
-BA-plotteR is created and maintained by Joachim Goedhart ([@joachimgoedhart](https://twitter.com/joachimgoedhart))
-
-### Example output
-
-Standard output generated with the example data:
-
-![alt text](https://github.com/JoachimGoedhart/BA-plotteR/blob/master/BA-plotteR_example1.png "Output")
+BA-plotteR is a tool for creating Bland-Altman plots, commonly used in assessing agreement between two different measurement methods. Also known as Tukey mean-difference plots, they were popularized in medical statistics by Bland and Altman. These plots help analyze quantitative differences between paired data from repeated measurements. They're particularly useful when comparing two methods applied to the same subject. BA-plotteR generates various visualizations for quantitative comparisons, based on the Bland-Altman plot principles. To use the tool effectively, it's recommended to familiarize oneself with the methods outlined in papers by Bland and Altman (1986, 1999). More information about the app can be found in the publication "BA-plotteR – A web tool for generating Bland-Altman plots and constructing limits of agreement" by Goedhart and Rishniw (2021).
